@@ -7,8 +7,8 @@ print(__file__)
 include_dir = Path(__file__).parent
 sys.path.append(str(include_dir))
 
-# import CheckRequirements
-# CheckRequirements.check_requirements()
+import CheckRequirements
+CheckRequirements.check_requirements()
 
 from main import *
 

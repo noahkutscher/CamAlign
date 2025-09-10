@@ -48,6 +48,7 @@ def check_requirements():
         print("All dependencies are satisfied.")
     except (DistributionNotFound, VersionConflict) as e:
         for dependency in dependencies:
+            print("Trying to install:", dependency)
             try:
                 pip.main(['install', dependency])
             except Exception as install_error:
