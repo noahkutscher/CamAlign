@@ -97,7 +97,6 @@ class ZoomableWindow:
         self.scaled_w, self.scaled_h = int(w * self.scale), int(h * self.scale)
         scaled_w, scaled_h = self.scaled_w, self.scaled_h
         
-        resized_image = cv2.resize(self.image, (scaled_w, scaled_h))
 
         display_image = np.zeros((self.window_size[1], self.window_size[0], 3), dtype=np.uint8)
         x_offset = self.offset[0]
@@ -112,7 +111,9 @@ class ZoomableWindow:
         src_width = min(self.window_size[0] - target_x_offset, scaled_w - src_x_start)
         src_height = min(self.window_size[1] - target_y_offset, scaled_h - src_y_start)
 
-        display_image[target_y_offset:target_y_offset+src_height, target_x_offset:target_x_offset+src_width] = resized_image[src_y_start:src_y_start+src_height, src_x_start:src_x_start+src_width]
+        image_chunk = self.image[int(src_y_start / self.scale):int((src_y_start + src_height) / self.scale), int(src_x_start / self.scale):int((src_x_start + src_width) / self.scale)]
+        image_chunk = cv2.resize(image_chunk, (int(src_width), int(src_height)))
+        display_image[target_y_offset:target_y_offset+src_height, target_x_offset:target_x_offset+src_width] = image_chunk
 
         cv2.imshow(self.window_name, display_image)
 
