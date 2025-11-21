@@ -1,2 +1,5 @@
 addon_data
 storage
+
+__pycache__
+*.png

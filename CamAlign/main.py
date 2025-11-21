@@ -222,29 +222,39 @@ def setup_renderer(filename, camera):
 
     return output_path
 
+def ShowMessageBox(message = "", title = "Message Box", icon = 'INFO'):
+
+    def draw(self, context):
+        self.layout.label(text=message)
+
+    bpy.context.window_manager.popup_menu(draw, title = title, icon = icon)
 
 def run_render():
     global RENDER_DONE, RENDER_PROG, CURRENT_RENDER, CURRENT_POSITION_BUFFER, TARGET_EDITABLE, TARGET_POSITIONS_DEBUG, TARGET_FRAME
     RENDER_DONE = False
 
     # render the prior camera
-    render_path = setup_renderer("color.png", bpy.data.objects['Camera_Prior'])
-    renderLayers, viewerNode = constructRenderGraph()
-    
-    CURRENT_POSITION_BUFFER = get_pass_img("Position", 3, np.float32, renderLayers, viewerNode)
-    RENDER_PROG = 0.5
-    CURRENT_RENDER = cv2.imread(str(render_path))
-
-    TARGET_EDITABLE = CURRENT_RENDER.copy()
-
-    # render the target
-    if 'Camera' in bpy.data.objects:
-        render_path = setup_renderer("color_target.png", bpy.data.objects['Camera'])
+    if 'Camera_Prior' in bpy.data.objects:
+        render_path = setup_renderer("color.png", bpy.data.objects['Camera_Prior'])
         renderLayers, viewerNode = constructRenderGraph()
         
-        TARGET_POSITIONS_DEBUG = get_pass_img("Position", 3, np.float32, renderLayers, viewerNode)
-        TARGET_FRAME = cv2.imread(str(render_path))
-        TARGET_EDITABLE = TARGET_FRAME.copy()
+        CURRENT_POSITION_BUFFER = get_pass_img("Position", 3, np.float32, renderLayers, viewerNode)
+        RENDER_PROG = 0.5
+        CURRENT_RENDER = cv2.imread(str(render_path))
+
+        TARGET_EDITABLE = CURRENT_RENDER.copy()
+
+        # render the target
+        if 'Camera' in bpy.data.objects:
+            render_path = setup_renderer("color_target.png", bpy.data.objects['Camera'])
+            renderLayers, viewerNode = constructRenderGraph()
+            
+            TARGET_POSITIONS_DEBUG = get_pass_img("Position", 3, np.float32, renderLayers, viewerNode)
+            TARGET_FRAME = cv2.imread(str(render_path))
+            TARGET_EDITABLE = TARGET_FRAME.copy()
+
+    else:
+        ShowMessageBox("You need to create a \'Camera_Prior\' object to define the initial guess.", "No Initial Camera Found!", 'ERROR')
         
     RENDER_PROG = 1.0
     RENDER_DONE = True
@@ -277,9 +287,8 @@ def cv_mouse_callback(event, x, y, flags, param):
     global selected_point, running_idx, point_database
 
     if event == cv2.EVENT_LBUTTONDBLCLK:
-        location = TARGET_POSITIONS_DEBUG[y, x, :]
-        location = np.array([location[0], location[1], location[2], 1.0])
-        print(f"{location} at clicked coords {x}, {y}")
+        location = bpy.context.scene.cursor.location
+        location = np.array([location.x, location.y, location.z, 1.0])
 
         name = f"Reference_{running_idx}"
         running_idx += 1
@@ -404,8 +413,12 @@ def delete_by_name(name):
 
 # Function to spawn an empty at a given 3D position
 def spawn_empty(location, name):
-    # bpy.ops.object.empty_add(type='PLAIN_AXES', location=bpy.context.scene.cursor.location)
     bpy.ops.object.empty_add(type='PLAIN_AXES', location=location)
+    newObj = bpy.data.objects['Empty']
+    newObj.name = name
+
+def spawn_empty_at_cursor(name):
+    bpy.ops.object.empty_add(type='PLAIN_AXES', location=bpy.context.scene.cursor.location)
     newObj = bpy.data.objects['Empty']
     newObj.name = name
 
@@ -422,6 +435,8 @@ def recieve_commands():
             delete_by_name(com.object_name)
         if com.command == "ADD":
             spawn_empty(com.location, com.object_name)
+        if com.command == "ADC":
+            spawn_empty_at_cursor(com.object_name)
         if com.command == "SEL":
             select_reference(com.object_name)
 
@@ -456,6 +471,9 @@ def get_camera_parameters():
 
 def create_camera_from_reference():
     global point_database
+
+    # just for safety, update the 3d positions first
+    update_3d_positions()
 
     cam = bpy.data.objects['Camera_Prior']
     loc = cam.location
@@ -579,24 +597,27 @@ def save_state():
         project_name = f'{i:06d}'
         save_folder = Path(__file__).parent / "storage" / project_name
         i += 1
+
+    save_dict = {
+        "points": {}
+    }
     
     save_folder.mkdir(exist_ok=True)
     cam = bpy.data.objects['Camera']
-    loc = cam.location
-    rot = cam.rotation_euler
-    f = cam.data.fisheye_lens
-    s = cam.data.sensor_width
+    if not cam is None:
+        loc = cam.location
+        rot = cam.rotation_euler
+        f = cam.data.fisheye_lens
+        s = cam.data.sensor_width
 
-    save_dict = {
-        "info":{
+        save_dict["info"]={
             "loc": [loc.x, loc.y, loc.z],
             "rot": [rot.x, rot.y, rot.z],
             "rot_info": rot.order,
             "f": f,
             "s": s
-        },
-        "points": {}
-    }
+        }
+
     with db_lock:
         for k in point_database:
             save_dict["points"][k] = [point_database[k][0].tolist(), point_database[k][1].tolist()]
@@ -623,12 +644,14 @@ def load_state(save_folder):
     with open(save_folder / "points.json", "r") as f:
         load_dict_full = json.load(f)
 
-    cam = bpy.data.objects['Camera']
-    cam.location.x, cam.location.y, cam.location.z = load_dict_full["info"]["loc"]
-    cam.rotation_euler.x, cam.rotation_euler.y, cam.rotation_euler.z = load_dict_full["info"]["rot"]
 
-    cam.data.fisheye_lens = load_dict_full["info"]["f"]
-    cam.data.sensor_width = load_dict_full["info"]["s"]
+    if "info" in load_dict_full:
+        cam = bpy.data.objects['Camera']
+        cam.location.x, cam.location.y, cam.location.z = load_dict_full["info"]["loc"]
+        cam.rotation_euler.x, cam.rotation_euler.y, cam.rotation_euler.z = load_dict_full["info"]["rot"]
+
+        cam.data.fisheye_lens = load_dict_full["info"]["f"]
+        cam.data.sensor_width = load_dict_full["info"]["s"]
 
     load_dict = load_dict_full["points"]
     with db_lock:
@@ -661,7 +684,7 @@ def load_state(save_folder):
     DATABASE_DIRTY = True
 
 
-class RenderProgressPanel(bpy.types.Panel):
+class OptimizationPanel(bpy.types.Panel):
     """ Creates a panel in the UI to trigger the render """
     bl_label = "Camera Optimization"
     bl_idname = "RENDER_PT_progress"
@@ -673,16 +696,27 @@ class RenderProgressPanel(bpy.types.Panel):
         layout = self.layout
         layout.operator("opticam.start_render")
         
-        layout.operator("opticam.load_state")
-        layout.operator("opticam.save_state")
-        
         layout.operator("opticam.open_filebrowser")
         layout.operator("opticam.open_render")
         
         layout.operator("opticam.find_matches")
         
-        layout.operator("opticam.update_refs")
+        # layout.operator("opticam.update_refs")
         layout.operator("opticam.create_camera")
+
+class ProjectsPanel(bpy.types.Panel):
+    """ Creates a panel in the UI to trigger the render """
+    bl_label = "Projects"
+    bl_idname = "RENDER_PT_projects"
+    bl_space_type = "VIEW_3D"
+    bl_region_type = "UI"
+    bl_category = "CamAlign"
+
+    def draw(self, context):
+        layout = self.layout
+        
+        layout.operator("opticam.load_state")
+        layout.operator("opticam.save_state")
 
 class StartRenderOperator(bpy.types.Operator):
     """ Operator to start the render """
@@ -696,6 +730,11 @@ class StartRenderOperator(bpy.types.Operator):
 class FindMatchesOperator(bpy.types.Operator):
     bl_idname = "opticam.find_matches"
     bl_label = "Automatically Find Matches"
+
+    @classmethod
+    def poll(cls, context):
+        global TARGET_FRAME, CURRENT_RENDER
+        return TARGET_FRAME is not None and CURRENT_RENDER is not None
     
     def invoke(self, context, event):
         populatePointDatabase()
@@ -706,6 +745,12 @@ class FindMatchesOperator(bpy.types.Operator):
 class IMAGE_OT_open_render(bpy.types.Operator):
     bl_idname = "opticam.open_render"
     bl_label = "Open Editor"
+
+
+    @classmethod
+    def poll(cls, context):
+        global TARGET_FRAME
+        return TARGET_FRAME is not None
     
     def execute(self, context):
         # Open the rendered image in an image editor
@@ -771,7 +816,8 @@ class OpenFileBrowserOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelp
         return {'FINISHED'}
     
 classes = [
-    RenderProgressPanel,
+    OptimizationPanel,
+    ProjectsPanel,
     StartRenderOperator,
     UpdatePointsOperator,
     CreateCameraOperator,
