@@ -602,20 +602,13 @@ def create_camera_from_reference():
 def open_render_result():
     run_edit_thread()
 
-def save_state():
+def save_state(save_folder):
     global point_database
 
     update_3d_positions()
 
-    save_folder = Path(__file__).parent / "storage"
+    
     save_folder.mkdir(exist_ok=True)
-    i = 0
-
-    while save_folder.exists():
-        project_name = f'{i:06d}'
-        save_folder = Path(__file__).parent / "storage" / project_name
-        i += 1
-
     save_dict = {
         "points": {}
     }
@@ -793,14 +786,21 @@ class CreateCameraOperator(bpy.types.Operator):
         create_camera_from_reference()
         return {'FINISHED'}
     
-class SaveStateOperator(bpy.types.Operator):
+class SaveStateOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
     bl_idname = "opticam.save_state"
     bl_label = "Save State"
+    filepath = Path(__file__).parent
     
     def execute(self, context):
         # Open the rendered image in an image editor
-        save_state()
+        p = Path(self.filepath).parent
+        save_state(p)
         return {'FINISHED'}
+    
+    def invoke(self, context, event):
+        # Set the default directory here
+        self.filepath = str(Path(__file__).parent)
+        return super().invoke(context, event)
     
 class LoadStateOperator(bpy.types.Operator, bpy_extras.io_utils.ImportHelper):
     bl_idname = "opticam.load_state"
