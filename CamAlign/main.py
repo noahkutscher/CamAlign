@@ -21,6 +21,8 @@ from FeatureMatcher import RunLightGlueMatcher
 
 from scipy.optimize import minimize
 
+from ZoomableWindow.ZoomableWindow import ZoomableWindow
+
 class EditCommand:
     command = ""
     object_name = ""
@@ -270,9 +272,16 @@ WINDOW_TITLE = "Editor"
 running_idx = 0
 selected_point = None
 
+EDITOR_WINDOW: ZoomableWindow = None
+
 def redraw():
-    global point_database
+    global point_database, EDITOR_WINDOW
     CURRENT_EDITABLE = TARGET_FRAME.copy()
+
+    if EDITOR_WINDOW is None:
+        EDITOR_WINDOW = ZoomableWindow(WINDOW_TITLE, CURRENT_EDITABLE)
+
+
     with db_lock:
         for k in point_database:
             point = point_database[k][0]
@@ -281,53 +290,101 @@ def redraw():
             else:
                 cv2.circle(CURRENT_EDITABLE, (point[0], point[1]), 3, (0, 0, 255))
 
-        cv2.imshow(WINDOW_TITLE, CURRENT_EDITABLE)
+        # cv2.imshow(WINDOW_TITLE, CURRENT_EDITABLE)
+        EDITOR_WINDOW.image = CURRENT_EDITABLE
+        EDITOR_WINDOW.show()
 
-def cv_mouse_callback(event, x, y, flags, param):
-    global selected_point, running_idx, point_database
+def spawn_click(x, y, flags, param):
+    global selected_point, running_idx, point_database, EDITOR_WINDOW
+    real_x, real_y = EDITOR_WINDOW.convert_window_to_image_coords(x, y)
 
-    if event == cv2.EVENT_LBUTTONDBLCLK:
-        location = bpy.context.scene.cursor.location
-        location = np.array([location.x, location.y, location.z, 1.0])
 
-        name = f"Reference_{running_idx}"
-        running_idx += 1
+    location = bpy.context.scene.cursor.location
+    location = np.array([location.x, location.y, location.z, 1.0])
+
+    name = f"Reference_{running_idx}"
+    running_idx += 1
+    with db_lock:
+        print(f"add point: {name} at image coords {real_x}, {real_y} -> world coords {location}")
+        point_database[name] = [
+            np.array([real_x, real_y]),
+            location
+        ]
+
+    com = EditCommand()
+    com.command = "ADD"
+    com.location = location[:3]
+    com.object_name = name
+    COM_EDIT2BLENDER.put(com)
+    redraw()
+
+def select_click(x, y, flags, param):
+    global selected_point, running_idx, point_database, EDITOR_WINDOW
+    real_x, real_y = EDITOR_WINDOW.convert_window_to_image_coords(x, y)
+
+    if(flags & cv2.EVENT_FLAG_SHIFTKEY) > 0:
+        loc = np.array([real_x, real_y])
         with db_lock:
-            point_database[name] = [
-                np.array([x, y]),
-                location
-            ]
+            for k in point_database:
+                if np.linalg.norm(point_database[k][0] - loc) < 5:
+                    selected_point = k
 
-        com = EditCommand()
-        com.command = "ADD"
-        com.location = location[:3]
-        com.object_name = name
-        COM_EDIT2BLENDER.put(com)
+                    com = EditCommand()
+                    com.command = "SEL"
+                    com.object_name = selected_point
+
+                    COM_EDIT2BLENDER.put(com)
+
         redraw()
 
-    if event == cv2.EVENT_LBUTTONDOWN:
-        if(flags & cv2.EVENT_FLAG_SHIFTKEY) > 0:
-            loc = np.array([x, y])
-            with db_lock:
-                for k in point_database:
-                    if np.linalg.norm(point_database[k][0] - loc) < 5:
-                        selected_point = k
 
-                        com = EditCommand()
-                        com.command = "SEL"
-                        com.object_name = selected_point
+# def cv_mouse_callback(event, x, y, flags, param):
+#     global selected_point, running_idx, point_database
 
-                        COM_EDIT2BLENDER.put(com)
+#     if event == cv2.EVENT_LBUTTONDBLCLK:
+#         location = bpy.context.scene.cursor.location
+#         location = np.array([location.x, location.y, location.z, 1.0])
 
-            redraw()
+#         name = f"Reference_{running_idx}"
+#         running_idx += 1
+#         with db_lock:
+#             point_database[name] = [
+#                 np.array([x, y]),
+#                 location
+#             ]
+
+#         com = EditCommand()
+#         com.command = "ADD"
+#         com.location = location[:3]
+#         com.object_name = name
+#         COM_EDIT2BLENDER.put(com)
+#         redraw()
+
+#     if event == cv2.EVENT_LBUTTONDOWN:
+#         if(flags & cv2.EVENT_FLAG_SHIFTKEY) > 0:
+#             loc = np.array([x, y])
+#             with db_lock:
+#                 for k in point_database:
+#                     if np.linalg.norm(point_database[k][0] - loc) < 5:
+#                         selected_point = k
+
+#                         com = EditCommand()
+#                         com.command = "SEL"
+#                         com.object_name = selected_point
+
+#                         COM_EDIT2BLENDER.put(com)
+
+#             redraw()
 
 def edit_thread():
-    global TARGET_EDITABLE, EDITOR_OPEN, DATABASE_DIRTY, selected_point, point_database
+    global TARGET_EDITABLE, EDITOR_OPEN, DATABASE_DIRTY, selected_point, point_database, EDITOR_WINDOW
     TARGET_EDITABLE = TARGET_FRAME.copy()
 
     print("thread started")
     redraw()
-    cv2.setMouseCallback(WINDOW_TITLE, cv_mouse_callback)
+    # cv2.setMouseCallback(WINDOW_TITLE, cv_mouse_callback)
+    EDITOR_WINDOW.add_mouse_callback(cv2.EVENT_LBUTTONDBLCLK, spawn_click)
+    EDITOR_WINDOW.add_mouse_callback(cv2.EVENT_LBUTTONDOWN, select_click)
 
     EDITOR_OPEN = True
     try:
@@ -364,7 +421,9 @@ def edit_thread():
     except Exception:
         print(traceback.format_exc())
 
-    cv2.destroyAllWindows()
+    EDITOR_WINDOW.close()
+    EDITOR_WINDOW = None
+    # cv2.destroyAllWindows()
     print("Window Closed")
 
     with db_lock:
