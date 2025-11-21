@@ -13,9 +13,9 @@ class ZoomableWindow:
         self.scaled_w = image.shape[1]
         self.scaled_h = image.shape[0]
 
-        self.window_size = (1024, 720)
+        self.window_size = [1024, 720]
 
-        cv2.namedWindow(self.window_name)
+        cv2.namedWindow(self.window_name, cv2.WINDOW_NORMAL)
         cv2.setMouseCallback(self.window_name, self.mouse_callback)
 
         self.additional_callbacks = []
@@ -93,6 +93,16 @@ class ZoomableWindow:
         return int(img_x), int(img_y)
 
     def show(self):
+        win_x, win_y, win_w, win_h = cv2.getWindowImageRect(self.window_name)
+        if not self.window_size[0] == win_w or not self.window_size[1] == win_h:
+            diff_w = win_w - self.window_size[0]
+            diff_h = win_h - self.window_size[1]
+
+            self.offset = (self.offset[0] + diff_w // 2, self.offset[1] + diff_h // 2)
+
+            self.window_size[0] = win_w
+            self.window_size[1] = win_h
+
         h, w = self.image.shape[:2]
         self.scaled_w, self.scaled_h = int(w * self.scale), int(h * self.scale)
         scaled_w, scaled_h = self.scaled_w, self.scaled_h
