@@ -614,8 +614,8 @@ def save_state(save_folder):
     }
     
     save_folder.mkdir(exist_ok=True)
-    cam = bpy.data.objects['Camera']
-    if not cam is None:
+    if 'Camera' in bpy.data.objects:
+        cam = bpy.data.objects['Camera']
         loc = cam.location
         rot = cam.rotation_euler
         f = cam.data.fisheye_lens
